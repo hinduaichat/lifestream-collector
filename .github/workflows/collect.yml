@@ -6,10 +6,14 @@ on:
       batch:
         description: "Number of titles to process this run"
         required: false
-        default: "200"
+        default: "1000"
+      concurrency:
+        description: "Number of titles to process in parallel"
+        required: false
+        default: "10"
   schedule:
-    # every 6 hours — keeps the sweep going unattended
-    - cron: "0 */6 * * *"
+    # every 2 hours — keeps the sweep going unattended
+    - cron: "0 */2 * * *"
 
 # Only one run at a time — concurrent runs would corrupt state.json
 concurrency:
@@ -43,10 +47,11 @@ jobs:
 
       - name: Run collector
         env:
-          BATCH: ${{ github.event.inputs.batch || '200' }}
+          BATCH: ${{ github.event.inputs.batch || '1000' }}
+          CONCURRENCY: ${{ github.event.inputs.concurrency || '10' }}
         run: |
           cd data-repo
-          node collect.mjs --batch="${BATCH}"
+          node collect.mjs --batch="${BATCH}" --concurrency="${CONCURRENCY}"
 
       - name: Commit and push results
         env:
