@@ -4,18 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       batch:
-        description: "Number of titles to process this run"
+        description: "Number of titles to process"
         required: false
         default: "1000"
-      concurrency:
-        description: "Number of titles to process in parallel"
+      mode:
+        description: "collect (embed URLs) or reprobe (direct stream check)"
         required: false
-        default: "10"
+        default: "reprobe"
   schedule:
-    # every 2 hours — keeps the sweep going unattended
     - cron: "0 */2 * * *"
 
-# Only one run at a time — concurrent runs would corrupt state.json
 concurrency:
   group: collect-streams
   cancel-in-progress: false
@@ -37,59 +35,53 @@ jobs:
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          set -euo pipefail
-          echo "::group::Clone private data repo"
           git clone --depth 1 "https://x-access-token:${PAT_TOKEN}@github.com/hinduaichat/lifestream-collector-data.git" data-repo
           cd data-repo
           git config user.email "actions@github.com"
           git config user.name "github-actions[bot]"
-          echo "::endgroup::"
 
-      - name: Run collector
+      - name: Run reprobe (direct stream check)
+        if: github.event.inputs.mode != 'collect'
         env:
           BATCH: ${{ github.event.inputs.batch || '1000' }}
-          CONCURRENCY: ${{ github.event.inputs.concurrency || '10' }}
         run: |
           cd data-repo
-          node collect.mjs --batch="${BATCH}" --concurrency="${CONCURRENCY}"
+          node reprobe.mjs --batch="${BATCH}" --concurrency=10
 
-      - name: Commit and push results
+      - name: Run collect (embed URLs)
+        if: github.event.inputs.mode == 'collect'
+        env:
+          BATCH: ${{ github.event.inputs.batch || '1000' }}
+        run: |
+          cd data-repo
+          node collect.mjs --batch="${BATCH}" --concurrency=10
+
+      - name: Commit and push
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           cd data-repo
           git add -A
           if git diff --cached --quiet; then
-            echo "Nothing new to commit."
+            echo "Nothing to commit."
             exit 0
           fi
-          git commit -m "Auto-collected streams batch @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')
-
-          Batch processed via lifestream-collector workflow run
-          ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          git commit -m "Auto-reprobe batch @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           git push origin main
-          echo "::notice::Pushed new stream data to hinduaichat/lifestream-collector-data"
 
       - name: Summary
         if: always()
         run: |
           cd data-repo || exit 0
-          echo "## Collection progress" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f data/state.json ]; then
-            CURSOR=$(jq -r '.cursor' data/state.json)
-            TOTAL=$(jq -r '.total' data/state.json)
-            COLLECTED=$(jq -r '.collected' data/state.json)
-            FAILED=$(jq -r '.failed' data/state.json)
-            SKIPPED=$(jq -r '.skipped' data/state.json)
-            PCT=$(jq -r 'if .total > 0 then (.cursor / .total * 100 | floor) else 0 end' data/state.json)
+          if [ -f data/reprobe-state.json ]; then
+            CURSOR=$(jq -r '.cursor' data/reprobe-state.json)
+            TOTAL=$(jq -r '.total' data/reprobe-state.json)
+            RECOVERED=$(jq -r '.recovered' data/reprobe-state.json)
+            MISSING=$(jq -r '.stillMissing' data/reprobe-state.json)
+            echo "## Reprobe Progress" >> $GITHUB_STEP_SUMMARY
             echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
             echo "|---|---|" >> $GITHUB_STEP_SUMMARY
             echo "| Cursor | ${CURSOR} / ${TOTAL} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Progress | ${PCT}% |" >> $GITHUB_STEP_SUMMARY
-            echo "| Collected | ${COLLECTED} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Failed | ${FAILED} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Skipped (already had) | ${SKIPPED} |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Run again: [Actions → Collect missing streams → Run workflow](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/collect.yml)" >> $GITHUB_STEP_SUMMARY
+            echo "| Recovered | ${RECOVERED} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Still Missing | ${MISSING} |" >> $GITHUB_STEP_SUMMARY
           fi
