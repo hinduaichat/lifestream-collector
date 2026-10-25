@@ -41,6 +41,7 @@ jobs:
           node reprobe.mjs --batch="${BATCH}" --concurrency=10
 
       - name: Commit and push
+        if: always()
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
