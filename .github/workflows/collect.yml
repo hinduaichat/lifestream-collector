@@ -1,60 +1,44 @@
-name: Collect missing streams
+name: Reprobe all missing streams
 
 on:
   workflow_dispatch:
     inputs:
       batch:
-        description: "Number of titles to process"
+        description: "Number of titles"
         required: false
-        default: "1000"
-      mode:
-        description: "collect (embed URLs) or reprobe (direct stream check)"
-        required: false
-        default: "reprobe"
+        default: "70000"
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "0 */6 * * *"
 
 concurrency:
-  group: collect-streams
+  group: reprobe
   cancel-in-progress: false
 
 jobs:
-  collect:
+  reprobe:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
     steps:
-      - name: Checkout collector
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Clone private data repo
+      - name: Clone data repo
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          git clone --depth 1 "https://x-access-token:${PAT_TOKEN}@github.com/hinduaichat/lifestream-collector-data.git" data-repo
+          git clone "https://x-access-token:${PAT_TOKEN}@github.com/hinduaichat/lifestream-collector-data.git" data-repo
           cd data-repo
           git config user.email "actions@github.com"
           git config user.name "github-actions[bot]"
 
-      - name: Run reprobe (direct stream check)
-        if: github.event.inputs.mode != 'collect'
+      - name: Run reprobe (ALL remaining titles)
         env:
-          BATCH: ${{ github.event.inputs.batch || '1000' }}
+          BATCH: ${{ github.event.inputs.batch || '70000' }}
         run: |
           cd data-repo
           node reprobe.mjs --batch="${BATCH}" --concurrency=10
-
-      - name: Run collect (embed URLs)
-        if: github.event.inputs.mode == 'collect'
-        env:
-          BATCH: ${{ github.event.inputs.batch || '1000' }}
-        run: |
-          cd data-repo
-          node collect.mjs --batch="${BATCH}" --concurrency=10
 
       - name: Commit and push
         env:
@@ -66,7 +50,7 @@ jobs:
             echo "Nothing to commit."
             exit 0
           fi
-          git commit -m "Auto-reprobe batch @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git commit -m "Reprobe: full sweep @ $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           git push origin main
 
       - name: Summary
