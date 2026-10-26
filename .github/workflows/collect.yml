@@ -1,14 +1,22 @@
-name: Reprobe all missing streams
+name: Reprobe missing streams
 
 on:
   workflow_dispatch:
     inputs:
       batch:
-        description: "Number of titles"
+        description: "Number of titles per run"
         required: false
         default: "70000"
-  schedule:
-    - cron: "0 */6 * * *"
+      reset:
+        description: "Reset cursor to 0 (re-sweep from start)"
+        required: false
+        type: boolean
+        default: false
+
+# Scheduled cron disabled — initial 78,150-title sweep complete (2026-10-26).
+# Re-enable by uncommenting the `schedule:` block below if new misses appear.
+# schedule:
+#   - cron: "0 */6 * * *"
 
 concurrency:
   group: reprobe
@@ -33,7 +41,16 @@ jobs:
           git config user.email "actions@github.com"
           git config user.name "github-actions[bot]"
 
-      - name: Run reprobe (ALL remaining titles)
+      - name: Reset cursor (optional)
+        if: ${{ inputs.reset == true }}
+        run: |
+          cd data-repo
+          jq '.cursor = 0 | .recovered = 0 | .stillMissing = 0 | .recoveredIds = []' data/reprobe-state.json > /tmp/state.json
+          mv /tmp/state.json data/reprobe-state.json
+          echo "[]' > data/recovered-titles.json
+          echo "Cursor reset to 0."
+
+      - name: Run reprobe
         env:
           BATCH: ${{ github.event.inputs.batch || '70000' }}
         run: |
@@ -63,10 +80,12 @@ jobs:
             TOTAL=$(jq -r '.total' data/reprobe-state.json)
             RECOVERED=$(jq -r '.recovered' data/reprobe-state.json)
             MISSING=$(jq -r '.stillMissing' data/reprobe-state.json)
+            PCT=$(awk "BEGIN{printf \"%.2f\", ${CURSOR}*100/${TOTAL}}")
             echo "## Reprobe Progress" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
             echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-            echo "| Cursor | ${CURSOR} / ${TOTAL} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Cursor | ${CURSOR} / ${TOTAL} (${PCT}%) |" >> $GITHUB_STEP_SUMMARY
             echo "| Recovered | ${RECOVERED} |" >> $GITHUB_STEP_SUMMARY
             echo "| Still Missing | ${MISSING} |" >> $GITHUB_STEP_SUMMARY
           fi
